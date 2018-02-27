@@ -52,7 +52,9 @@ public class MappingSourceTest {
                 .setName("MergingSourceTest")
                 .setFindAndReplace(ImmutableMap.of(
                         "foo/([^/]*)/bar", ImmutableList.of("foo/bar"),
-                        "cat/([^/]*)/dog", ImmutableList.of("cat/dog", "cat/dog/$1")))
+                        "cat/([^/]*)/dog", ImmutableList.of("cat/dog", "cat/dog/$1"),
+                        "tagged/([^/]*)/dog", ImmutableList.of("tagged/dog;animal=$1"),
+                        "tagged/([^/]*)/dog", ImmutableList.of("tagged/$animal/dog")))
                 .setSource(_mockSource);
     }
 
@@ -238,6 +240,48 @@ public class MappingSourceTest {
 
     @Test
     public void testReplaceWithCapture() {
+        final Record matchingRecord = TestBeanFactory.createRecordBuilder()
+                .setMetrics(ImmutableMap.of(
+                        "cat/sheep/dog",
+                        TestBeanFactory.createMetricBuilder()
+                                .setType(MetricType.GAUGE)
+                                .setValues(ImmutableList.of(
+                                        new Quantity.Builder()
+                                                .setValue(1.23d)
+                                                .setUnit(Unit.BYTE)
+                                                .build()))
+                                .build()))
+                .build();
+
+        final Source mergingSource = _mappingSourceBuilder.build();
+        mergingSource.attach(_mockObserver);
+        notify(_mockSource, matchingRecord);
+
+        final ArgumentCaptor<Record> argument = ArgumentCaptor.forClass(Record.class);
+        Mockito.verify(_mockObserver).notify(Mockito.same(mergingSource), argument.capture());
+        final Record actualRecord = argument.getValue();
+
+        final Record expectedRecord = TestBeanFactory.createRecordBuilder()
+                .setAnnotations(matchingRecord.getAnnotations())
+                .setTime(matchingRecord.getTime())
+                .setMetrics(ImmutableMap.of(
+                        "cat/dog/sheep",
+                        TestBeanFactory.createMetricBuilder()
+                                .setType(MetricType.GAUGE)
+                                .setValues(ImmutableList.of(
+                                        new Quantity.Builder()
+                                                .setValue(1.23d)
+                                                .setUnit(Unit.BYTE)
+                                                .build()))
+                                .build()))
+                .build();
+        Assert.assertTrue(
+                String.format("expected=%s, actual=%s", expectedRecord, actualRecord),
+                UnorderedRecordEquality.equals(expectedRecord, actualRecord));
+    }
+
+    @Test
+    public void testReplaceWithCaptureWithTags() {
         final Record matchingRecord = TestBeanFactory.createRecordBuilder()
                 .setMetrics(ImmutableMap.of(
                         "cat/sheep/dog",
