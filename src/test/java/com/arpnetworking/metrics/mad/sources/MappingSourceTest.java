@@ -54,7 +54,7 @@ public class MappingSourceTest {
                         "foo/([^/]*)/bar", ImmutableList.of("foo/bar"),
                         "cat/([^/]*)/dog", ImmutableList.of("cat/dog", "cat/dog/$1"),
                         "tagged/([^/]*)/dog", ImmutableList.of("tagged/dog;animal=$1"),
-                        "tagged/([^/]*)/dog", ImmutableList.of("tagged/$animal/dog")))
+                        "tagged/([^/]*)/animal", ImmutableList.of("tagged/$animal/animal")))
                 .setSource(_mockSource);
     }
 

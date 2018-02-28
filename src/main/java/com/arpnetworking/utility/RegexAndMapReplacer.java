@@ -15,8 +15,6 @@
  */
 package com.arpnetworking.utility;
 
-import scala.Int;
-
 import java.util.Map;
 import java.util.regex.Matcher;
 
@@ -33,7 +31,7 @@ public final class RegexAndMapReplacer {
      * @param input input string to match against
      * @param replace replacement string
      * @param variables map of variables to include
-     * @return
+     * @return a string with replacement tokens replaced
      */
     public static String replaceAll(final Matcher matcher, final String input, final String replace, final Map<String, String> variables) {
 
@@ -59,73 +57,87 @@ public final class RegexAndMapReplacer {
 
     private static void appendReplacement(final Matcher matcher, final String replacement, final StringBuilder replacementBuilder,
                                           final Map<String, String> variables) {
-        final StringBuilder tokenStringBuilder = new StringBuilder();
-        boolean inEscape = false;
-        boolean readingReplaceToken = false;
-        boolean inReplaceBrackets = false;
-        boolean replaceTokenNumeric = true; // assume token is numeric, any non-numeric character will set this to false
-        for (int x = 0; x < replacement.length(); x++) {
+        final StringBuilder tokenBuilder = new StringBuilder();
+        int x = -1;
+        while (x < replacement.length() - 1) {
+            x++;
             final char c = replacement.charAt(x);
-            if (!inEscape && c == '\\') {
-                inEscape = true;
-                continue;
-            }
-            if (inEscape) {
-                final StringBuilder builder;
-                if (readingReplaceToken) {
-                    builder = tokenStringBuilder;
-                } else {
-                    builder = replacementBuilder;
-                }
-                if (c == '\\' || c == '$' || c == '}') {
-                    builder.append(c);
-                    inEscape = false;
-                } else {
-                    throw new IllegalArgumentException("Improperly escaped '" + String.valueOf(c) + "' in replacement at col " + x + ": " + replacement);
-                }
-            } else if (readingReplaceToken) {
-                if (c == '{') {
-                    inReplaceBrackets = true;
-                    continue;
-                } else if (c == '}' && inReplaceBrackets) {
-                        final String replaceToken = tokenStringBuilder.toString();
-                        replacementBuilder.append(getReplacement(matcher, replaceToken, replaceTokenNumeric, variables));
-                        tokenStringBuilder.setLength(0);
-                        inReplaceBrackets = false;
-                        readingReplaceToken = false;
-                        continue;
-                } else if (!Character.isDigit(c)) {
-                    if (inReplaceBrackets) {
-                        replaceTokenNumeric = false;
-                        tokenStringBuilder.append(c);
-                    } else {
-                        final String replaceToken = tokenStringBuilder.toString();
-                        if (replaceToken.isEmpty()) {
-                            throw new IllegalArgumentException("Non-numeric replacements must be of the form ${val}. Missing '{' at col "
-                                    + x + ": " + replacement);
-                        }
-                        replacementBuilder.append(getReplacement(matcher, replaceToken, replaceTokenNumeric, variables));
-                        tokenStringBuilder.setLength(0);
-                        readingReplaceToken = false;
-                        x--; // We can't process the character because we are no longer in the numeric group syntax, we need to process the
-                             // $n replacement and then evaluate this character again.
-                        continue;
-                    }
-                } else {
-                    tokenStringBuilder.append(c);
-                }
+            if (c == '\\') {
+                x++;
+                processEscapedCharacter(replacement, x, replacementBuilder);
             } else {
                 if (c == '$') {
-                    readingReplaceToken = true;
+                    x += writeReplacementToken(replacement, x, replacementBuilder, matcher, variables, tokenBuilder);
                 } else {
                     replacementBuilder.append(c);
                 }
             }
         }
-        if (tokenStringBuilder.length() > 0 && replaceTokenNumeric) {
-            final String replaceToken = tokenStringBuilder.toString();
-            replacementBuilder.append(getReplacement(matcher, replaceToken, true, variables));
+    }
+
+    private static void processEscapedCharacter(final String replacement, final int x, final StringBuilder builder) {
+        if (x >= replacement.length()) {
+            throw new IllegalArgumentException(
+                    String.format("Improper escaping in replacement, must not have trailing '\\' at col %d: %s", x, replacement));
         }
+        final Character c = replacement.charAt(x);
+        if (c == '\\' || c == '$' || c == '}') {
+            builder.append(c);
+        } else {
+            throw new IllegalArgumentException(
+                    String.format("Improperly escaped '%s' in replacement at col %d: %s", c, x, replacement));
+        }
+    }
+
+    private static int writeReplacementToken(final String replacement, final int offset, final StringBuilder output,
+            final Matcher matcher, final Map<String, String> variables, final StringBuilder tokenBuilder) {
+        boolean inReplaceBrackets = false;
+        boolean tokenNumeric = true;
+        tokenBuilder.setLength(0);  // reset the shared builder
+        int x = offset + 1;
+        char c = replacement.charAt(x);
+
+        // Optionally consume the opening brace
+        if (c == '{') {
+            inReplaceBrackets = true;
+            x++;
+            c = replacement.charAt(x);
+        }
+
+        if (inReplaceBrackets) {
+            // Consume until we hit the }
+            while (x < replacement.length() - 1 && c != '}') {
+                if (c == '\\') {
+                    x++;
+                    processEscapedCharacter(replacement, x, tokenBuilder);
+                } else {
+                    tokenBuilder.append(c);
+                }
+                if (tokenNumeric && !Character.isDigit(c)) {
+                    tokenNumeric = false;
+                }
+                x++;
+                c = replacement.charAt(x);
+            }
+            if (c != '}') {
+                throw new IllegalArgumentException("Invalid replacement token, expected '}' at col " + x + ": " + replacement);
+            }
+            x++; // Consume the }
+            output.append(getReplacement(matcher, tokenBuilder.toString(), tokenNumeric, variables));
+        } else {
+            // Consume until we hit a non-digit character
+            while (x < replacement.length()) {
+                c = replacement.charAt(x);
+                if (Character.isDigit(c)) {
+                    tokenBuilder.append(c);
+                } else {
+                    break;
+                }
+                x++;
+            }
+            output.append(getReplacement(matcher, tokenBuilder.toString(), true, variables));
+        }
+        return x - offset - 1;
     }
 
     private static String getReplacement(final Matcher matcher, final String replaceToken, final boolean numeric,
@@ -142,5 +154,5 @@ public final class RegexAndMapReplacer {
         }
     }
 
-    private RegexAndMapReplacer () { }
+    private RegexAndMapReplacer() { }
 }
