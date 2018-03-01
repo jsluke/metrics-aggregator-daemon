@@ -31,6 +31,7 @@ import com.arpnetworking.steno.LoggerFactory;
 import com.arpnetworking.tsdcore.model.MetricType;
 import com.arpnetworking.tsdcore.model.Quantity;
 import com.google.common.base.MoreObjects;
+import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -40,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Implementation of <code>Source</code> which wraps another <code>Source</code>
@@ -95,6 +97,7 @@ public final class MappingSource extends BaseSource {
     private final Map<Pattern, List<String>> _findAndReplace;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MappingSource.class);
+    private static final Splitter.MapSplitter TAG_SPLITTER = Splitter.on(';').omitEmptyStrings().trimResults().withKeyValueSeparator('=');
 
     // NOTE: Package private for testing
     /* package private */ static final class MappingObserver implements Observer {
@@ -123,7 +126,27 @@ public final class MappingSource extends BaseSource {
                     final Matcher matcher = findAndReplace.getKey().matcher(metric.getKey());
                     if (matcher.find()) {
                         for (final String replacement : findAndReplace.getValue()) {
-                            merge(metric.getValue(), matcher.replaceAll(replacement), mergedMetrics);
+                            final String replacedString = matcher.replaceAll(replacement);
+
+                            final int tagsStart = replacedString.indexOf(';');
+                            if (tagsStart == -1) {
+                                // We just have a metric name.  Optimize for this common case
+                                merge(metric.getValue(), replacedString, mergedMetrics);
+                            } else {
+                                final Map<String, String> parsedTags = TAG_SPLITTER.split(replacedString.substring(tagsStart + 1));
+                                final Map<String, String> finalTags = Maps.newTreeMap();
+                                finalTags.putAll(record.getDimensions());
+                                finalTags.putAll(parsedTags);
+                                final StringBuilder keyBuilder = new StringBuilder();
+                                keyBuilder.append(replacedString.substring(0, tagsStart + 1));
+                                keyBuilder.append(
+                                        finalTags.entrySet()
+                                                .stream()
+                                                .map(entry -> String.format("%s=%s", entry.getKey(), entry.getValue()))
+                                                .collect(Collectors.joining(";")));
+
+                                merge(metric.getValue(), keyBuilder.toString(), mergedMetrics);
+                            }
                         }
                         //Having "found" set here means that mapping a metric to an empty list suppresses that metric
                         found = true;
